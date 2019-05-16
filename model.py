@@ -17,7 +17,7 @@ CONFIG_NAME = 'bert_config.json'
 class BertDecoder(nn.Module):
     ''' A decoder model with self attention mechanism. '''
 
-    def __init__(self, decoder_config, stage_1_emb, stage_2_emb, device, dropout=0.1):
+    def __init__(self, decoder_config, embedding, device, dropout=0.1):
 
         super().__init__()
         self.len_max_seq = decoder_config['len_max_seq']
@@ -37,15 +37,14 @@ class BertDecoder(nn.Module):
             get_sinusoid_encoding_table(self.n_position, d_word_vec, padding_idx=0),
             freeze=True)
         
-        self.stage_1_emb = stage_1_emb
-        self.stage_2_emb = stage_2_emb
+        self.embedding = embedding
 
         self.layer_stack = nn.ModuleList([
             DecoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
         self.last_linear = nn.Linear(d_model, vocab_size)
 
-    def forward(self, tgt_seq, src_seq, enc_output, stage):
+    def forward(self, tgt_seq, src_seq, enc_output):
 
         dec_slf_attn_list, dec_enc_attn_list = [], []
 
@@ -60,14 +59,7 @@ class BertDecoder(nn.Module):
             
         tgt_pos = torch.arange(1, tgt_seq.size(-1) + 1).unsqueeze(0).repeat(tgt_seq.size(0), 1).to(self.device)
         # -- Forward
-        if stage == 1:
-            dec_output = self.stage_1_emb(tgt_seq) + self.position_enc(tgt_pos)
-        else:
-            batch_size, tgt_seq_len = tgt_seq.size(0), tgt_seq.size(1)
-            dec_enc_attn_mask = dec_enc_attn_mask.repeat(tgt_seq_len, 1, 1)
-            dec_output = self.stage_2_emb(tgt_seq, attention_mask=tgt_seq.ne(Constants.PAD).type(torch.float), output_all_encoded_layers=False)[0]
-            dec_output += self.position_enc(tgt_pos)
-            enc_output = enc_output.repeat(tgt_seq_len, 1, 1)
+        dec_output = self.embedding(tgt_seq) + self.position_enc(tgt_pos)
         
         for dec_layer in self.layer_stack:
             dec_output, dec_slf_attn, dec_enc_attn = dec_layer(
@@ -80,7 +72,7 @@ class BertDecoder(nn.Module):
 
 
 class BertAbsSum(nn.Module):
-    def __init__(self, bert_model_path, decoder_config, device, draft_only):
+    def __init__(self, bert_model_path, decoder_config, device):
         super().__init__()
 
         self.bert_encoder = BertModel.from_pretrained(bert_model_path)
@@ -88,9 +80,8 @@ class BertAbsSum(nn.Module):
         bert_config = BertConfig.from_json_file(bert_config_file)
         self.device = device
         self.bert_emb = BertEmbeddings(bert_config)
-        self.decoder = BertDecoder(decoder_config, self.bert_emb, self.bert_encoder, device) 
+        self.decoder = BertDecoder(decoder_config, self.bert_emb, device) 
         self.teacher_forcing = 0.5
-        self.draft_only = draft_only
     
     def forward(self, src, src_mask, tgt, tgt_mask):
         # src/tgt: [batch_size, seq_len]
@@ -102,21 +93,8 @@ class BertAbsSum(nn.Module):
         # token_type_ids is not important since we only have one sentence so we can use default all zeros
         bert_encoded = self.bert_encoder(src, attention_mask=src_mask, output_all_encoded_layers=False)[0]  # [batch_size, seq_len, hidden_size]
         # transformer input: BertDecoder.forward(self, tgt_seq_embedded, tgt_pos, src_seq, enc_output, return_attns=False)
-        draft_logits = self.decoder(tgt, src, bert_encoded, 1)  # [batch_size, seq_len, vocab_size]
-        if self.draft_only:
-            return draft_logits, None
-        draft = draft_logits.max(-1)[1]  # [batch_size, seq_len]
-        if random() < self.teacher_forcing:
-            draft = tgt
-        batch_size, tgt_seq_len = tgt.size(0), tgt.size(-1)
-        refine_mask = torch.diag(torch.ones(tgt_seq_len))
-        refine_mask[0][0] = 0
-        refine_mask = refine_mask.unsqueeze(0).ne(0).to(self.device)  # [1, seq_len, seq_len]
-        refine_masked_input = draft.unsqueeze(1).repeat(1, tgt_seq_len, 1).masked_fill(refine_mask, Constants.MASK).view(-1, tgt_seq_len)  # [batch_size * seq_len, seq_len]
-        refine_logits = self.decoder(refine_masked_input, src, bert_encoded, 2).view(batch_size, tgt_seq_len, tgt_seq_len, -1)  # [batch_size, seq_len, seq_len, vocab_size]
-        mask = torch.diag(torch.ones(tgt_seq_len)).unsqueeze(0).unsqueeze(-1).eq(1).repeat(batch_size, 1, 1, refine_logits.size(-1)).to(self.device)
-        refine_logits = refine_logits[mask].view(batch_size, tgt_seq_len, -1)  # [batch_size, seq_len, vocab_size]
-        return refine_logits, draft_logits
+        logits = self.decoder(tgt, src, bert_encoded)  # [batch_size, seq_len, vocab_size]
+        return logits
     
     def beam_decode(self, src_seq, src_mask, beam_size, n_best):
         ''' Translation work in one batch '''
@@ -163,7 +141,7 @@ class BertAbsSum(nn.Module):
                 return dec_partial_seq
 
             def predict_word(dec_seq, src_seq, enc_output, n_active_inst, beam_size):
-                dec_output = self.decoder(dec_seq, src_seq, enc_output, 1)
+                dec_output = self.decoder(dec_seq, src_seq, enc_output)
                 dec_output = dec_output[:, -1, :]  # Pick the last step: (bh * bm) * d_h
                 word_prob = nn.functional.log_softmax(dec_output, dim=1)
                 word_prob = word_prob.view(n_active_inst, beam_size, -1)

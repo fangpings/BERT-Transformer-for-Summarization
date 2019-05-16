@@ -76,9 +76,9 @@ parser.add_argument('--gradient_accumulation_steps',
                     type=int,
                     default=1,
                     help="Number of updates steps to accumulate before performing a backward/update pass.")
-parser.add_argument('--draft_only',
-                    action='store_true',
-                    help="Only use stage 1 to generate drafts.")
+# parser.add_argument('--draft_only',
+#                     action='store_true',
+#                     help="Only use stage 1 to generate drafts.")
 parser.add_argument("--output_dir",
                     default=None,
                     type=str,
@@ -89,28 +89,20 @@ parser.add_argument("--output_dir",
 TODO: beam/greedy search, eval, copy, rouge
 '''
 
-def cal_performance(draft_logits, refine_logits, ground, smoothing=True):
+def cal_performance(logits, ground, smoothing=True):
     ground = ground[:, 1:]
-    draft_logits = draft_logits.view(-1, draft_logits.size(-1))
-    if refine_logits is not None:
-        refine_logits = refine_logits.view(-1, refine_logits.size(-1))
+    logits = logits.view(-1, logits.size(-1))
     ground = ground.contiguous().view(-1)
 
-    loss = cal_loss(draft_logits, refine_logits, ground, smoothing=smoothing)
+    loss = cal_loss(logits, ground, smoothing=smoothing)
 
     pad_mask = ground.ne(Constants.PAD)
-    draft_pred = draft_logits.max(-1)[1]
-    draft_correct = draft_pred.eq(ground)
-    draft_correct = draft_correct.masked_select(pad_mask).sum().item()
-    if refine_logits is not None:
-        refine_pred = refine_logits.max(-1)[1]
-        refine_correct = refine_pred.eq(ground)
-        refine_correct = refine_correct.masked_select(pad_mask).sum().item()
-        return loss, draft_correct, refine_correct
-    else:
-        return loss, draft_correct, None
+    pred = logits.max(-1)[1]
+    correct = pred.eq(ground)
+    correct = correct.masked_select(pad_mask).sum().item()
+    return loss, correct
 
-def cal_loss(draft_logits, refine_logits, ground, smoothing=True):
+def cal_loss(logits, ground, smoothing=True):
     def label_smoothing(logits, labels):
         eps = 0.1
         num_classes = logits.size(-1)
@@ -127,17 +119,11 @@ def cal_loss(draft_logits, refine_logits, ground, smoothing=True):
         loss = loss.masked_select(non_pad_mask).mean()
         return loss
     if smoothing:
-        draft_loss = label_smoothing(draft_logits, ground)
+        loss = label_smoothing(logits, ground)
     else:
-        draft_loss = F.cross_entropy(draft_logits, ground, ignore_index=Constants.PAD)
-    if refine_logits is not None:
-        if smoothing:
-            refine_loss = label_smoothing(refine_logits, ground)
-        else:
-            refine_loss = F.cross_entropy(refine_logits, ground, ignore_index=Constants.PAD)
-        return draft_loss + refine_loss
-    else:
-        return draft_loss
+        loss = F.cross_entropy(logits, ground, ignore_index=Constants.PAD)
+    
+    return loss
 
 
 if __name__ == "__main__":
@@ -187,7 +173,7 @@ if __name__ == "__main__":
     logger.info('Loading train examples...')
     if not os.path.exists(os.path.join(args.data_dir, 'train.csv')):
         raise ValueError(f'train.csv does not exist.')
-    train_examples = processor.get_examples(os.path.join(args.data_dir, 'train_big.csv'))
+    train_examples = processor.get_examples(os.path.join(args.data_dir, 'train_small.csv'))
     num_train_optimization_steps = int(len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps) * args.num_train_epochs
     logger.info('Converting train examples to features...')
     train_features = convert_examples_to_features(train_examples, args.max_src_len, args.max_tgt_len, tokenizer)
@@ -221,7 +207,7 @@ if __name__ == "__main__":
 
 
     # model
-    model = BertAbsSum(args.bert_model, decoder_config, device, args.draft_only)
+    model = BertAbsSum(args.bert_model, decoder_config, device)
     model.to(device)
     if n_gpu > 1:
         model = torch.nn.DataParallel(model)
@@ -251,8 +237,8 @@ if __name__ == "__main__":
         nb_tr_examples, nb_tr_steps = 0, 0
         for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration")):
             batch = tuple(t.to(device) for t in batch)
-            draft_logits, refine_logits = model(*batch)
-            loss, *_ = cal_performance(draft_logits, refine_logits, batch[2])
+            logits = model(*batch)
+            loss, _ = cal_performance(logits, batch[2])
             if n_gpu > 1:
                 loss = loss.mean()
             if args.gradient_accumulation_steps > 1:
@@ -268,7 +254,7 @@ if __name__ == "__main__":
             if (step + 1) % args.print_every == 0:
                 logger.info(f'Epoch {i}, step {step}, loss {loss.item()}.')
                 logger.info(f'Ground: {"".join(tokenizer.convert_ids_to_tokens(batch[2][0].cpu().numpy()))}')
-                logger.info(f'Generated: {"".join(tokenizer.convert_ids_to_tokens(draft_logits[0].max(-1)[1].cpu().numpy()))}')
+                logger.info(f'Generated: {"".join(tokenizer.convert_ids_to_tokens(logits[0].max(-1)[1].cpu().numpy()))}')
         # do evaluation
         if args.output_dir is not None:
             state_dict = model.module.state_dict() if n_gpu > 1 else model.state_dict()
@@ -293,7 +279,8 @@ if __name__ == "__main__":
         logger.info(f'Epoch {i} finished.')
     with open(os.path.join(args.bert_model, 'bert_config.json'), 'r') as f:
         bert_config = json.load(f)
-    config = {'bert_config': bert_config, 'decoder_config': decoder_config, 'draft_only': args.draft_only}
+    config = {'bert_config': bert_config, 'decoder_config': decoder_config}
     with open(os.path.join(model_path, 'config.json'), 'w') as f:
         json.dump(config, f)
     logger.info('Training finished')
+
