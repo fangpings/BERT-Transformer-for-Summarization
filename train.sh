@@ -1,4 +1,4 @@
-python main.py \
+python train.py \
     --data_dir data/processed_data\
     --bert_model pretrained_model\
     --GPU_index "1,2"\

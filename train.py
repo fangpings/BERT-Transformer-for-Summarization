@@ -173,7 +173,7 @@ if __name__ == "__main__":
     logger.info('Loading train examples...')
     if not os.path.exists(os.path.join(args.data_dir, 'train.csv')):
         raise ValueError(f'train.csv does not exist.')
-    train_examples = processor.get_examples(os.path.join(args.data_dir, 'train_small.csv'))
+    train_examples = processor.get_examples(os.path.join(args.data_dir, 'train.csv'))
     num_train_optimization_steps = int(len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps) * args.num_train_epochs
     logger.info('Converting train examples to features...')
     train_features = convert_examples_to_features(train_examples, args.max_src_len, args.max_tgt_len, tokenizer)
