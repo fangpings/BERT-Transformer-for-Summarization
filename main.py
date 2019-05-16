@@ -27,7 +27,10 @@ parser.add_argument("--data_dir",
                     type=str,
                     required=True,
                     help="The input data path. Should contain the .tsv files (or other data files) for the task.")
-parser.add_argument("--bert_model", default=None, type=str, required=True,
+parser.add_argument("--bert_model", 
+                    default=None, 
+                    type=str, 
+                    required=True,
                     help="Bert pre-trained model selected in the list: bert-base-uncased, "
                     "bert-large-uncased, bert-base-cased, bert-large-cased, bert-base-multilingual-uncased, "
                     "bert-base-multilingual-cased, bert-base-chinese.")
@@ -136,11 +139,14 @@ def cal_loss(draft_logits, refine_logits, ground, smoothing=True):
     else:
         return draft_loss
 
+
 if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.GPU_index != '-1':
         os.environ["CUDA_VISIBLE_DEVICES"] = args.GPU_index
+    if not torch.cuda.is_available():
+        raise ValueError('CUDA is not available.')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_gpu = torch.cuda.device_count()
     assert args.train_batch_size % n_gpu == 0
@@ -181,7 +187,7 @@ if __name__ == "__main__":
     logger.info('Loading train examples...')
     if not os.path.exists(os.path.join(args.data_dir, 'train.csv')):
         raise ValueError(f'train.csv does not exist.')
-    train_examples = processor.get_examples(os.path.join(args.data_dir, 'train.csv'))
+    train_examples = processor.get_examples(os.path.join(args.data_dir, 'train_big.csv'))
     num_train_optimization_steps = int(len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps) * args.num_train_epochs
     logger.info('Converting train examples to features...')
     train_features = convert_examples_to_features(train_examples, args.max_src_len, args.max_tgt_len, tokenizer)
@@ -196,7 +202,7 @@ if __name__ == "__main__":
     logger.info("tgt_ids: %s" % " ".join([str(x) for x in example_feature.tgt_ids]))
     logger.info("tgt_mask: %s" % " ".join([str(x) for x in example_feature.tgt_mask]))
     logger.info('Building dataloader...')
-    train_data = create_dataset(train_features, is_eval=False)
+    train_data = create_dataset(train_features)
     train_sampler = RandomSampler(train_data)
     train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size, drop_last=True)
 
@@ -209,7 +215,7 @@ if __name__ == "__main__":
         eval_examples = processor.get_examples(os.path.join(args.data_dir, 'eval.csv'))
         logger.info('Converting eval examples to features...')
         eval_features = convert_examples_to_features(eval_examples, args.max_src_len, args.max_tgt_len, tokenizer)
-        eval_data = create_dataset(eval_features, is_eval=True)
+        eval_data = create_dataset(eval_features)
         eval_sampler = RandomSampler(eval_data)
         eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.train_batch_size, drop_last=True)
 
@@ -261,18 +267,33 @@ if __name__ == "__main__":
                 global_step += 1
             if (step + 1) % args.print_every == 0:
                 logger.info(f'Epoch {i}, step {step}, loss {loss.item()}.')
-                logger.info(f'Ground: {tokenizer.convert_ids_to_tokens(batch[2][0].cpu().numpy())}')
-                logger.info(f'Generated: {tokenizer.convert_ids_to_tokens(draft_logits[0].max(-1)[1].cpu().numpy())}')
+                logger.info(f'Ground: {"".join(tokenizer.convert_ids_to_tokens(batch[2][0].cpu().numpy()))}')
+                logger.info(f'Generated: {"".join(tokenizer.convert_ids_to_tokens(draft_logits[0].max(-1)[1].cpu().numpy()))}')
         # do evaluation
+        if args.output_dir is not None:
+            state_dict = model.module.state_dict() if n_gpu > 1 else model.state_dict()
+            torch.save(state_dict, os.path.join(model_path, 'BertAbsSum_{}.bin'.format(i)))
+            logger.info('Model saved')
         if eval_dataloader is not None:
             model.eval()
             batch = next(iter(eval_dataloader))
             batch = tuple(t.to(device) for t in batch)
+            # beam_decode
             if n_gpu > 1:
                 pred, _ = model.module.beam_decode(batch[0], batch[1], 3, 3)
             else:
                 pred, _ = model.beam_decode(batch[0], batch[1])
-            logger.info(f'Generated: {tokenizer.convert_ids_to_tokens(pred[0][0])}')
-        if args.output_dir is not None:
-            torch.save(model.state_dict(), os.path.join(model_path, 'BertAbsSum.bin'))
+            logger.info(f'Source: {"".join(tokenizer.convert_ids_to_tokens(batch[0][0].cpu().numpy()))}')
+            logger.info(f'Beam Generated: {"".join(tokenizer.convert_ids_to_tokens(pred[0][0]))}')
+            # if n_gpu > 1:
+            #     pred = model.module.greedy_decode(batch[0], batch[1])
+            # else:
+            #     pred = model.greedy_decode(batch[0], batch[1])
+            # logger.info(f'Beam Generated: {tokenizer.convert_ids_to_tokens(pred[0].cpu().numpy())}')
         logger.info(f'Epoch {i} finished.')
+    with open(os.path.join(args.bert_model, 'bert_config.json'), 'r') as f:
+        bert_config = json.load(f)
+    config = {'bert_config': bert_config, 'decoder_config': decoder_config, 'draft_only': args.draft_only}
+    with open(os.path.join(model_path, 'config.json'), 'w') as f:
+        json.dump(config, f)
+    logger.info('Training finished')

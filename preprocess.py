@@ -139,15 +139,12 @@ def convert_examples_to_features(examples, src_max_seq_length, tgt_max_seq_lengt
                                       tgt_mask=tgt_mask))
     return features
 
-def create_dataset(features, is_eval):
+def create_dataset(features):
     all_src_ids = torch.tensor([f.src_ids for f in features], dtype=torch.long)
     all_src_mask = torch.tensor([f.src_mask for f in features], dtype=torch.long)
-    if not is_eval:
-        all_tgt_ids = torch.tensor([f.tgt_ids for f in features], dtype=torch.long)
-        all_tgt_mask = torch.tensor([f.tgt_mask for f in features], dtype=torch.long)
-        train_data = TensorDataset(all_src_ids, all_src_mask, all_tgt_ids, all_tgt_mask)
-    else:
-        train_data = TensorDataset(all_src_ids, all_src_mask)
+    all_tgt_ids = torch.tensor([f.tgt_ids for f in features], dtype=torch.long)
+    all_tgt_mask = torch.tensor([f.tgt_mask for f in features], dtype=torch.long)
+    train_data = TensorDataset(all_src_ids, all_src_mask, all_tgt_ids, all_tgt_mask)
     return train_data
 
 if __name__ == "__main__":

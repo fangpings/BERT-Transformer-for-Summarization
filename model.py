@@ -96,8 +96,8 @@ class BertAbsSum(nn.Module):
         # src/tgt: [batch_size, seq_len]
 
         # shift right
-        tgt = tgt[:, 1:]
-        tgt_mask = tgt_mask[:, 1:]
+        tgt = tgt[:, :-1]
+        tgt_mask = tgt_mask[:, :-1]
         # bert input: BertModel.forward(self, input_ids, token_type_ids=None, attention_mask=None, output_all_encoded_layers=True)
         # token_type_ids is not important since we only have one sentence so we can use default all zeros
         bert_encoded = self.bert_encoder(src, attention_mask=src_mask, output_all_encoded_layers=False)[0]  # [batch_size, seq_len, hidden_size]
@@ -231,6 +231,17 @@ class BertAbsSum(nn.Module):
         batch_hyp, batch_scores = collect_hypothesis_and_scores(inst_dec_beams, n_best)
 
         return batch_hyp, batch_scores
+
+    def greedy_decode(self, src_seq, src_mask):
+        enc_output = self.bert_encoder(src_seq, attention_mask=src_mask, output_all_encoded_layers=False)[0]
+        dec_seq = torch.full((src_seq.size(0), ), Constants.BOS).unsqueeze(-1).type_as(src_seq)
+
+        for i in range(self.decoder.len_max_seq):
+            dec_output = self.decoder(dec_seq, src_seq, enc_output, 1)
+            dec_output = dec_output.max(-1)[1]
+            dec_seq = torch.cat((dec_seq, dec_output[:, -1].unsqueeze(-1)), 1)
+        return dec_seq
+
 
 
 
