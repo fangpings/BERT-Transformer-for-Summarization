@@ -20,6 +20,8 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s -   %(message
                     level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+TRAIN_FILE = 'train_big.csv'
+
 parser = argparse.ArgumentParser()
 # Required parameters
 parser.add_argument("--data_dir",
@@ -171,9 +173,9 @@ if __name__ == "__main__":
     processor = LCSTSProcessor()
     tokenizer = BertTokenizer.from_pretrained(os.path.join(args.bert_model, 'vocab.txt'))
     logger.info('Loading train examples...')
-    if not os.path.exists(os.path.join(args.data_dir, 'train.csv')):
+    if not os.path.exists(os.path.join(args.data_dir, TRAIN_FILE)):
         raise ValueError(f'train.csv does not exist.')
-    train_examples = processor.get_examples(os.path.join(args.data_dir, 'train.csv'))
+    train_examples = processor.get_examples(os.path.join(args.data_dir, TRAIN_FILE))
     num_train_optimization_steps = int(len(train_examples) / args.train_batch_size / args.gradient_accumulation_steps) * args.num_train_epochs
     logger.info('Converting train examples to features...')
     train_features = convert_examples_to_features(train_examples, args.max_src_len, args.max_tgt_len, tokenizer)
@@ -283,4 +285,5 @@ if __name__ == "__main__":
     with open(os.path.join(model_path, 'config.json'), 'w') as f:
         json.dump(config, f)
     logger.info('Training finished')
+
 

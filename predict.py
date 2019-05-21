@@ -62,7 +62,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     with open(args.config_path, 'r') as f:
         config = json.load(f)
-    model = BertAbsSum(args.bert_model, config['decoder_config'], device, config['draft_only'])
+    model = BertAbsSum(args.bert_model, config['decoder_config'], device)
     model.load_state_dict(torch.load(args.model_path))
     model.to(device)
 

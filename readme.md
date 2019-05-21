@@ -48,3 +48,11 @@ It is mostly the same as train.sh, but you have to specify 5 required parameters
 
 `--result_path` The path where you save your results.
 
+### Server
+For online testing, run server.sh. The same as evaluation, you have to specify `--model_path`, `--config_path` and `--bert_model`. Besides, you can also specify which address to listen to by specifying `--address` (default is 0.0.0.0) and which port to set up your service by `--port` (default is 8080).
+
+To use this feature, you should *POST* your *JSON-formatted* data to `address:port/summarization`. The data should contain 'text' key where you put the source text you want to summarize. An example may like this
+```
+curl -X POST -H "Content-type: application/json" -d '{"text":"美国商务部官方网站5月20日发布：给华为及其合作伙伴90天的临时许可。该发布称，这项安排是为了给相关部门和公司提供进行调整的时间。"}' localhost:8080/summarization
+```
+

@@ -147,9 +147,26 @@ def create_dataset(features):
     train_data = TensorDataset(all_src_ids, all_src_mask, all_tgt_ids, all_tgt_mask)
     return train_data
 
+def convert_one_example(text, src_max_seq_length, tokenizer):
+    src_tokens = tokenizer.tokenize(text)
+    if len(src_tokens) > src_max_seq_length - 2:
+        src_tokens = src_tokens[:(src_max_seq_length - 2)]
+    src_tokens = ["[CLS]"] + src_tokens + ["[SEP]"]
+
+    src_ids = tokenizer.convert_tokens_to_ids(src_tokens)
+
+    src_mask = [1] * len(src_ids)
+    src_padding = [0] * (src_max_seq_length - len(src_ids))
+    src_ids += src_padding
+    src_mask += src_padding
+
+    return torch.tensor([src_ids]), torch.tensor([src_mask])
+
 if __name__ == "__main__":
-    processor = LCSTSProcessor()
-    tokenizer = BertTokenizer.from_pretrained('chinese_L-12_H-768_A-12')
-    examples = processor.get_train_examples('data/processed_data')
-    features = convert_examples_to_features(examples, 130, 20, tokenizer)
+    # processor = LCSTSProcessor()
+    tokenizer = BertTokenizer.from_pretrained(os.path.join('pretrained_model', 'vocab.txt'))    # examples = processor.get_train_examples('data/processed_data')
+    # features = convert_examples_to_features(examples, 130, 20, tokenizer)
+
+    print(convert_one_example('新京报讯（记者 梁辰）5月20日，针对外媒报道因美国政府将华为列入实体名单，而谷歌已暂停与华为部分业务往来的消息，谷歌中国通过邮件回复记者称，“我们正在遵守这一命令，并审查其影响”。', 130, tokenizer))
+    
     
