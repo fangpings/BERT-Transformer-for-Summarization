@@ -1,5 +1,5 @@
 ## BERT-Transformer for Abstractive Text Summarization
-It is a Pytorch implementation for abstractive text summarization model using BERT as encoder and transformer decoder as decoder. It tries to use bert encoder in generative tasks. The Pytorch Bert implementation is brought from [pytorch-pretrained-BERT](https://github.com/huggingface/pytorch-pretrained-BERT) and Transformer implementaion form [attention-is-all-you-need-pytorch](https://github.com/jadore801120/attention-is-all-you-need-pytorch). It has been tested on LCSTS Chinese dataset and achieved good results.
+It is a Pytorch implementation for abstractive text summarization model using BERT as encoder and transformer decoder as decoder. It tries to use bert encoder in generative tasks. The Pytorch Bert implementation is brought from [pytorch-pretrained-BERT](https://github.com/huggingface/pytorch-pretrained-BERT) and Transformer implementaion from [attention-is-all-you-need-pytorch](https://github.com/jadore801120/attention-is-all-you-need-pytorch). It has been tested on LCSTS Chinese dataset and achieved good results.
 
 ## Preparation
 ### Dataset
